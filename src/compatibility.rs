@@ -1,166 +1,217 @@
+use core::fmt::{Debug, Formatter};
+
 /// An expansion of a bitmask contained in `CompatibilityTable`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CompatibilityEntry {
-  /// Whether we support this option from us -> them.
-  pub local: bool,
-  /// Whether we support this option from them -> us.
-  pub remote: bool,
-  /// Whether this option is locally enabled.
-  pub local_state: bool,
-  /// Whether this option is remotely enabled.
-  pub remote_state: bool,
+#[derive(Default, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct Entry(u8);
+
+impl Entry {
+    #[must_use]
+    #[allow(clippy::fn_params_excessive_bools)]
+    pub fn new(local: bool, remote: bool, local_state: bool, remote_state: bool) -> Self {
+        let mut entry = Self::default();
+        if local {
+            entry.set_local_support();
+        }
+        if remote {
+            entry.set_remote_support();
+        }
+        if local_state {
+            entry.set_local_enabled();
+        }
+        if remote_state {
+            entry.set_remote_enabled();
+        }
+        entry
+    }
+
+    #[must_use]
+    pub fn local_support(&self) -> bool {
+        self.0 & Table::ENABLED_LOCAL == Table::ENABLED_LOCAL
+    }
+
+    pub fn set_local_support(&mut self) {
+        self.0 |= Table::ENABLED_LOCAL;
+    }
+
+    pub fn clear_local_support(&mut self) {
+        self.0 &= !Table::ENABLED_LOCAL;
+    }
+
+    #[must_use]
+    pub fn remote_support(&self) -> bool {
+        self.0 & Table::ENABLED_REMOTE == Table::ENABLED_REMOTE
+    }
+
+    pub fn set_remote_support(&mut self) {
+        self.0 |= Table::ENABLED_REMOTE;
+    }
+
+    pub fn clear_remote_support(&mut self) {
+        self.0 &= !Table::ENABLED_REMOTE;
+    }
+
+    #[must_use]
+    pub fn local_enabled(&self) -> bool {
+        self.0 & Table::LOCAL_STATE == Table::LOCAL_STATE
+    }
+
+    pub fn set_local_enabled(&mut self) {
+        self.0 |= Table::LOCAL_STATE;
+    }
+
+    pub fn clear_local_enabled(&mut self) {
+        self.0 &= !Table::LOCAL_STATE;
+    }
+
+    #[must_use]
+    pub fn remote_enabled(&self) -> bool {
+        self.0 & Table::REMOTE_STATE == Table::REMOTE_STATE
+    }
+
+    pub fn set_remote_enabled(&mut self) {
+        self.0 |= Table::REMOTE_STATE;
+    }
+
+    pub fn clear_remote_enabled(&mut self) {
+        self.0 &= !Table::REMOTE_STATE;
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
-impl CompatibilityEntry {
-  #[must_use]
-  pub fn new(local: bool, remote: bool, local_state: bool, remote_state: bool) -> Self {
-    Self {
-      local,
-      remote,
-      local_state,
-      remote_state,
+impl Debug for Entry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Entry")
+            .field("value", &self.0)
+            .field("local_support", &self.local_support())
+            .field("local_enabled", &self.local_enabled())
+            .field("remote_support", &self.remote_support())
+            .field("remote_enabled", &self.remote_enabled())
+            .finish()
     }
-  }
-
-  /// Creates a u8 bitmask from this entry.
-  #[must_use]
-  pub fn into_u8(self) -> u8 {
-    let mut res = 0;
-    if self.local {
-      res |= CompatibilityTable::ENABLED_LOCAL;
-    }
-    if self.remote {
-      res |= CompatibilityTable::ENABLED_REMOTE;
-    }
-    if self.local_state {
-      res |= CompatibilityTable::LOCAL_STATE;
-    }
-    if self.remote_state {
-      res |= CompatibilityTable::REMOTE_STATE;
-    }
-    res
-  }
-
-  /// Expands a u8 bitmask into a `CompatibilityEntry`.
-  #[must_use]
-  pub fn from(value: u8) -> Self {
-    Self {
-      local: value & CompatibilityTable::ENABLED_LOCAL == CompatibilityTable::ENABLED_LOCAL,
-      remote: value & CompatibilityTable::ENABLED_REMOTE == CompatibilityTable::ENABLED_REMOTE,
-      local_state: value & CompatibilityTable::LOCAL_STATE == CompatibilityTable::LOCAL_STATE,
-      remote_state: value & CompatibilityTable::REMOTE_STATE == CompatibilityTable::REMOTE_STATE,
-    }
-  }
 }
 
 /// A table of options that are supported locally or remotely, and their current state.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompatibilityTable {
-  options: [u8; 256],
+pub struct Table {
+    options: [Entry; TABLE_SIZE],
 }
 
-impl Default for CompatibilityTable {
-  fn default() -> Self {
-    Self { options: [0; 256] }
-  }
+impl Default for Table {
+    fn default() -> Self {
+        Self {
+            options: [Entry::default(); TABLE_SIZE],
+        }
+    }
 }
 
-impl CompatibilityTable {
-  /// Option is locally supported.
-  pub const ENABLED_LOCAL: u8 = 1;
-  /// Option is remotely supported.
-  pub const ENABLED_REMOTE: u8 = 1 << 1;
-  /// Option is currently enabled locally.
-  pub const LOCAL_STATE: u8 = 1 << 2;
-  /// Option is currently enabled remotely.
-  pub const REMOTE_STATE: u8 = 1 << 3;
+impl Table {
+    /// Option is locally supported.
+    pub const ENABLED_LOCAL: u8 = 1;
+    /// Option is remotely supported.
+    pub const ENABLED_REMOTE: u8 = 1 << 1;
+    /// Option is currently enabled locally.
+    pub const LOCAL_STATE: u8 = 1 << 2;
+    /// Option is currently enabled remotely.
+    pub const REMOTE_STATE: u8 = 1 << 3;
 
-  #[must_use]
-  pub fn new() -> Self {
-    Self::default()
-  }
+    const DEFINED_FLAGS: u8 =
+        Self::ENABLED_LOCAL | Self::ENABLED_REMOTE | Self::LOCAL_STATE | Self::REMOTE_STATE;
 
-  /// Create a table with some option values set.
-  ///
-  /// # Arguments
-  ///
-  /// `values` - A slice of `(u8, u8)` tuples. The first value is the option code, and the second is the bitmask value for that option.
-  ///
-  /// # Notes
-  ///
-  /// An option bitmask can be generated using the `CompatibilityEntry` struct, using `entry.into_u8()`.
-  #[must_use]
-  pub fn from_options(values: &[(u8, u8)]) -> Self {
-    let mut options = [0; 256];
-    for (opt, val) in values {
-      options[*opt as usize] = *val;
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
-    Self { options }
-  }
 
-  /// Enable local support for an option.
-  pub fn support_local(&mut self, option: u8) {
-    let mut opt = CompatibilityEntry::from(self.options[option as usize]);
-    opt.local = true;
-    self.set_option(option, opt);
-  }
-
-  /// Enable remote support for an option.
-  pub fn support_remote(&mut self, option: u8) {
-    let mut opt = CompatibilityEntry::from(self.options[option as usize]);
-    opt.remote = true;
-    self.set_option(option, opt);
-  }
-
-  /// Enable both remote and local support for an option.
-  pub fn support(&mut self, option: u8) {
-    let mut opt = CompatibilityEntry::from(self.options[option as usize]);
-    opt.local = true;
-    opt.remote = true;
-    self.set_option(option, opt);
-  }
-
-  /// Retrieve a `CompatbilityEntry` generated from the current state of the option value.
-  #[must_use]
-  pub fn get_option(&self, option: u8) -> CompatibilityEntry {
-    CompatibilityEntry::from(self.options[option as usize])
-  }
-
-  /// Set an option value by getting the bitmask from a `CompatibilityEntry`.
-  pub fn set_option(&mut self, option: u8, entry: CompatibilityEntry) {
-    self.options[option as usize] = entry.into_u8();
-  }
-
-  /// Reset all negotiated states
-  pub fn reset_states(&mut self) {
-    for opt in &mut self.options {
-      let mut entry = CompatibilityEntry::from(*opt);
-      entry.local_state = false;
-      entry.remote_state = false;
-      *opt = entry.into_u8();
+    /// Create a table with some option values set.
+    ///
+    /// # Arguments
+    ///
+    /// `values` - A slice of `(u8, u8)` tuples. The first value is the option code, and the second is the bitmask value for that option.
+    ///
+    /// # Notes
+    ///
+    /// An option bitmask can be generated using [`Entry::new`].
+    #[must_use]
+    pub fn from_options(values: &[(u8, u8)]) -> Self {
+        let mut options = [Entry::default(); TABLE_SIZE];
+        for (opt, val) in values {
+            options[*opt as usize] = Entry(*val & Self::DEFINED_FLAGS);
+        }
+        Self { options }
     }
-  }
+
+    /// Enable local support for an option.
+    pub fn support_local(&mut self, option: u8) {
+        self.option_mut(option).set_local_support();
+    }
+
+    /// Enable remote support for an option.
+    pub fn support_remote(&mut self, option: u8) {
+        self.option_mut(option).set_remote_support();
+    }
+
+    /// Enable both remote and local support for an option.
+    pub fn support(&mut self, option: u8) {
+        let entry = self.option_mut(option);
+        entry.set_local_support();
+        entry.set_remote_support();
+    }
+
+    #[must_use]
+    pub fn option_mut(&mut self, option: u8) -> &mut Entry {
+        &mut self.options[option as usize]
+    }
+
+    #[must_use]
+    pub fn option(&self, option: u8) -> &Entry {
+        &self.options[option as usize]
+    }
+
+    /// Reset all negotiated states
+    pub fn reset_states(&mut self) {
+        for opt in &mut self.options {
+            opt.clear_local_enabled();
+            opt.clear_remote_enabled();
+        }
+    }
+}
+
+impl From<u8> for Entry {
+    fn from(value: u8) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Entry> for u8 {
+    fn from(value: Entry) -> Self {
+        value.0
+    }
 }
 
 #[cfg(test)]
 mod test_compat {
-  use super::*;
-  use crate::telnet::op_option::GMCP;
+    use super::*;
+    use crate::telnet::op_option::GMCP;
 
-  #[test]
-  fn test_reset() {
-    let mut table = CompatibilityTable::default();
-    let entry = CompatibilityEntry::new(true, true, true, true);
-    assert!(entry.remote);
-    assert!(entry.local);
-    assert!(entry.remote_state);
-    assert!(entry.local_state);
-    table.set_option(GMCP, entry);
-    table.reset_states();
-    let entry = table.get_option(GMCP);
-    assert!(entry.remote);
-    assert!(entry.local);
-    assert!(!entry.remote_state);
-    assert!(!entry.local_state);
-  }
+    #[test]
+    fn test_reset() {
+        let mut table = Table::default();
+        let entry = Entry::new(true, true, true, true);
+        assert!(entry.remote_support());
+        assert!(entry.local_support());
+        assert!(entry.remote_enabled());
+        assert!(entry.local_enabled());
+        *table.option_mut(GMCP) = entry;
+        table.reset_states();
+        let entry = table.option(GMCP);
+        assert!(entry.remote_support());
+        assert!(entry.local_support());
+        assert!(!entry.remote_enabled());
+        assert!(!entry.local_enabled());
+    }
 }
+
+const TABLE_SIZE: usize = 1 + u8::MAX as usize;
